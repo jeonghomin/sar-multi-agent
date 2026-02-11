@@ -1,0 +1,30 @@
+# Core LangChain & LangGraph
+langgraph==0.2.45
+langchain==0.3.7
+langchain-community==0.3.5
+langchain-openai==0.2.5
+langchain-core==0.3.15
+
+# API & Web
+fastapi==0.115.5
+uvicorn==0.32.1
+streamlit==1.40.2
+langserve==0.3.0
+
+# SAR Processing
+asf_search==9.0.3
+# esa_snappy - 별도 설치 필요 (services/insar_processing/INSTALL_ESA_SNAPPY.sh)
+
+# Utilities
+requests==2.32.3
+pydantic==2.10.2
+python-dotenv==1.0.1
+aiohttp==3.11.7
+
+# Data Processing
+numpy
+pandas
+
+# Optional: For development
+jupyter
+ipython

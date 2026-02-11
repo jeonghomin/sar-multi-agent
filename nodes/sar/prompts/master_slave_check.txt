@@ -1,0 +1,33 @@
+사용자의 질문에서 InSAR 처리를 위한 Master와 Slave 정보가 명시되었는지 확인하세요.
+
+**사용자 질문:**
+{question}
+
+**사용 가능한 SAR 파일:**
+{files_info}
+
+**Master/Slave란?**
+- Master: InSAR의 기준 이미지 (일반적으로 이벤트 이전, 시간상 먼저)
+- Slave: InSAR의 비교 이미지 (일반적으로 이벤트 이후, 시간상 나중)
+
+**확인 규칙:**
+1. 질문에 "master", "slave", "마스터", "슬레이브" 등의 키워드와 함께 **인덱스 번호**가 명시되었는지 확인
+2. **인덱스는 0 또는 1만 유효합니다** (위 파일 목록의 [0], [1] 참고)
+3. 순서 표현 매핑:
+   - "첫번째", "first", "1번째" → 인덱스 0
+   - "두번째", "second", "2번째" → 인덱스 1
+4. 명시 예시:
+   - "Master 0, Slave 1" → 명시됨 (master_identifier="0", slave_identifier="1")
+   - "첫번째가 master, 두번째가 slave" → 명시됨 (master_identifier="0", slave_identifier="1")
+   - "master는 첫번째 slave는 두번째로" → 명시됨 (master_identifier="0", slave_identifier="1")
+5. 명시 안 됨 예시:
+   - "이 파일들로 InSAR" → 명시 안 됨
+   - "/path/file1.zip /path/file2.zip InSAR" → 명시 안 됨
+
+**중요**: master_identifier와 slave_identifier는 **"0" 또는 "1"만 반환**하세요. 날짜나 파일명을 반환하지 마세요!
+
+has_master: Master가 명시되었으면 true, 아니면 false
+has_slave: Slave가 명시되었으면 true, 아니면 false
+master_identifier: Master 인덱스 ("0" 또는 "1", 없으면 "")
+slave_identifier: Slave 인덱스 ("0" 또는 "1", 없으면 "")
+reasoning: 판단 근거를 1-2문장으로

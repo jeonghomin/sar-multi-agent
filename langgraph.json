@@ -1,0 +1,13 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "vision_rag": "./graph.py:app"
+  },
+  "env": ".env",
+  "host": "192.168.10.174",
+  "port": 8123,
+  "metadata": {
+    "description": "🛰️ Lumir-X 위성 데이터 분석 서비스",
+    "readme": "README.md"
+  }
+}

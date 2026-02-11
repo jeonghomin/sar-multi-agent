@@ -1,0 +1,3 @@
+다음 지역명이 SAR 검색에 충분히 구체적인지 판단하세요.
+지역명: {location_name}
+NOT_SPECIFIC: 국가명만 (튀르키예, 한국 등), SPECIFIC: 도시/지역 포함. 출력: SPECIFIC 또는 NOT_SPECIFIC
