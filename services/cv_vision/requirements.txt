@@ -1,0 +1,26 @@
+# FastAPI 관련
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+
+# 데이터 처리
+numpy>=1.24.0
+pillow>=10.0.0
+
+# 지리공간 데이터
+rasterio>=1.3.0
+
+# PyTorch (CUDA 버전에 맞게 설치 필요)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# MMSegmentation (Copernicus-FM 디코더용)
+# pip install mmsegmentation 또는 소스 설치 필요
+# mmsegmentation>=1.0.0
+
+# Pydantic
+pydantic>=2.0.0
+
+
+
+

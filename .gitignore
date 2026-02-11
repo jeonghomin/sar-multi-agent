@@ -51,6 +51,12 @@ faiss_vectorstore/
 .langgraph_api/
 .studiorc
 
+# CV Vision - 큰 파일들
+services/cv_vision/weights/
+services/cv_vision/DockerFile
+services/cv_vision/Dockerfile
+services/cv_vision/output/
+
 # SNAP
 /esa-snap/
 
