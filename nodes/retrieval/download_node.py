@@ -462,7 +462,7 @@ def download_sar(state):
                 idx = product.get('display_index', product['index'])
                 filename = product['filename']
                 size_mb = product['size_mb']
-                generation += f"[{idx}] {formatted_date}{timing_label}\n    {filename[:50]}... ({size_mb} MB)\n"
+                generation += f"\n[{idx}] {formatted_date}{timing_label}\n    📁 {filename[:60]}...\n    💾 크기: {size_mb} MB\n"
         
         if total > display_limit:
             generation += f"\n... 외 {total - display_limit}개\n"

@@ -1,7 +1,7 @@
 #!/bin/bash
 # 모든 서비스 시작 스크립트
 
-PROJECT_ROOT="/home/mjh/sar-multi-agent"
+PROJECT_ROOT="/home/mjh/Project/sar-multi-agent"
 
 echo "🚀 Starting All Services..."
 echo ""

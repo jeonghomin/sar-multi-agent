@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """LangServe 서버 - Agent CV Multi-Agent System"""
+import config  # Load environment variables (.env file)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langserve import add_routes

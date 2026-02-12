@@ -87,8 +87,8 @@ def retrieve(state):
     print("==== [RETRIEVE SAR METADATA - 좌표 기반 필터링] ====")
     coordinates = state.get("coordinates")
     
-    if pdf_setup.pdf_retriever is None and pdf_setup.vectorstore is None:
-        print("경고: VectorStore가 초기화되지 않았습니다.")
+    if pdf_setup is None or (pdf_setup.pdf_retriever is None and pdf_setup.vectorstore is None):
+        print("경고: VectorStore가 초기화되지 않았습니다. RAG 기능이 비활성화됩니다.")
         return {"documents": []}
     
     if not coordinates:

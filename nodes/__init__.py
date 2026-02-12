@@ -131,18 +131,21 @@ def main_router(state):
             return "retrieval"
     
     # 우선순위 1: InSAR 키워드 또는 파일 경로 빠른 체크 (⭐ 최우선!)
-    # - "InSAR", "간섭무늬" 키워드 또는 Sentinel-1 파일 경로 감지 → 바로 SAR PROCESSING으로
     insar_keywords = ["insar", "간섭무늬", "interferogram", "지표변형", "master", "slave"]
     has_insar_keyword = any(keyword in question_lower for keyword in insar_keywords)
     
     # Sentinel-1 파일 경로 패턴 체크
     has_sentinel_file = bool(re.search(r'S1[AB]_[^\s]+\.(?:zip|SAFE)', question))
     
-    if has_insar_keyword or has_sentinel_file:
-        print(f"==== [InSAR 키워드 또는 파일 경로 감지 - SAR PROCESSING로 직행] ====")
-        print(f"  - InSAR 키워드: {has_insar_keyword}")
-        print(f"  - Sentinel 파일: {has_sentinel_file}")
+    # 파일 경로가 명시되어 있으면 바로 SAR PROCESSING으로
+    if has_sentinel_file:
+        print(f"==== [Sentinel 파일 경로 감지 - SAR PROCESSING로 직행] ====")
         return "sar_processing"
+    
+    # InSAR 키워드만 있고 파일 경로가 없으면 RETRIEVAL로 (웹 검색 & 다운로드)
+    if has_insar_keyword:
+        print(f"==== [InSAR 키워드 감지 - RETRIEVAL로 (검색 & 다운로드)] ====")
+        return "retrieval"
     
     # 우선순위 2: 질문 유형 판단 (Q&A 질문인지 확인)
     # - "어디", "뭐", "어떤", "언제" 같은 의문사 → Q&A 질문

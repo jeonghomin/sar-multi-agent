@@ -1,6 +1,4 @@
 
-import config
-import pdf_setup
 from langgraph.graph import END, StateGraph, START
 import state
 import nodes
@@ -331,15 +329,15 @@ def create_workflow():
     def route_after_web_search(state):
         """
         web_search 이후 Intent 기반 라우팅:
-        - intent="sar_insar_processing" → run_insar (바로 InSAR 처리 실행)
+        - intent="sar_insar_processing" → save_location (지역 추출 → 다운로드 → InSAR)
         - intent="sar_get_data" → save_location (지역 추출 → 데이터 가져오기)
         - intent="sar_search_location" or "qa" → generate (검색 결과 출력)
         """
         intent = state.get("intent", "qa")
         
         if intent == "sar_insar_processing":
-            print("==== [Intent: sar_insar_processing - RUN_INSAR로 (즉시 처리)] ====")
-            return "run_insar"
+            print("==== [Intent: sar_insar_processing - SAVE_LOCATION으로 (다운로드 먼저)] ====")
+            return "save_location"
         elif intent == "sar_get_data":
             print("==== [Intent: sar_get_data - SAVE_LOCATION으로] ====")
             return "save_location"

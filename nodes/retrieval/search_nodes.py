@@ -93,13 +93,13 @@ def web_search(state):
     print(f"Intent: {intent}")
 
     if intent == "sar_insar_processing":
-        return {"documents": [], "location_name": None, "has_location_in_search": False}
+        return {"documents": [], "location_name": None, "has_location_in_search": False, "intent": intent}
 
     if intent == "sar_get_data":
         locations = extract_locations_from_text(question)
         if locations:
-            return {"documents": [], "location_name": locations[0], "has_location_in_search": False}
-        return {"documents": [], "location_name": None, "has_location_in_search": False}
+            return {"documents": [], "location_name": locations[0], "has_location_in_search": False, "intent": intent}
+        return {"documents": [], "location_name": None, "has_location_in_search": False, "intent": intent}
 
     recent_context = _get_recent_context(messages, 5, 200)
     optimize_prompt = load_prompt(
@@ -158,14 +158,16 @@ def web_search(state):
             "date_range": None,
             "coordinates": None,
             "metadata": None,
-            "needs_date_search": False
+            "needs_date_search": False,
+            "intent": intent
         }
     return {
         "documents": search_results_docs,
         "location_name": location_name,
         "has_location_in_search": location_name is not None,
         "date_range": date_range,
-        "metadata": None
+        "metadata": None,
+        "intent": intent
     }
 
 
