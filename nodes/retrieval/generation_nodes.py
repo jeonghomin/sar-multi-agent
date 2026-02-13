@@ -109,10 +109,20 @@ def generate(state):
             else:
                 context_with_summary = summary_prefix + str(documents)
         
+        # 디버깅: 실제 context 크기 확인
+        if isinstance(documents, list):
+            total_length = sum(len(str(doc)) for doc in documents)
+            print(f"[GENERATE DEBUG] documents 개수: {len(documents)}, 총 길이: {total_length}자")
+            for i, doc in enumerate(documents[:2]):  # 처음 2개만 샘플 출력
+                content = str(doc)[:500] if hasattr(doc, 'page_content') else str(doc)[:500]
+                print(f"[GENERATE DEBUG] doc[{i}] 샘플: {content[:200]}...")
+        
         generation = rag_chain.invoke({
             "question": question,
             "context": context_with_summary,
         })
+        print(f"[GENERATE DEBUG] 생성된 답변 길이: {len(generation)}자")
+        print(f"[GENERATE DEBUG] 생성된 답변 샘플: {generation[:500]}...")
     elif not documents and not metadata:
         generation = "검색된 문서가 없습니다."
     else:

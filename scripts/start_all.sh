@@ -21,11 +21,11 @@ INSAR_PID=$!
 sleep 2
 
 # 3. Agent Server (LangGraph + LangServe)
-echo "3️⃣ Starting Agent Server (port 8000)..."
-cd "$PROJECT_ROOT"
-python server.py &
-AGENT_PID=$!
-sleep 2
+# echo "3️⃣ Starting Agent Server (port 8000)..."
+# cd "$PROJECT_ROOT"
+# python server.py &
+# AGENT_PID=$!
+# sleep 2
 
 echo ""
 echo "✅ All services started!"

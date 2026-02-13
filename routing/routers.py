@@ -42,8 +42,16 @@ CRITICAL: Analyze the user's INTENT and context, not just keywords!
 
 4. **sar_processing** - ONLY for specialized InSAR interferometry analysis
    USE FOR:
+   - **PRIORITY 1: User provides Sentinel-1 file names directly**
+     Pattern: S1A_IW_SLC__* or S1B_IW_SLC__*
+     Examples: 
+       * "S1A_IW_SLC__1SDV_20230129T033452_... 이걸 master로 S1B_... 이걸 slave로 InSAR"
+       * "/mnt/sar/S1A_IW_SLC__*.zip으로 InSAR 해줘"
+       * User specifies exact file paths/names → **ALWAYS route to sar_processing**
+   
    - InSAR processing: interferogram generation, phase analysis
      Examples: "InSAR 처리", "간섭무늬 생성", "지표변형 분석"
+   
    - Ground deformation: earthquake/volcano deformation measurement
      Examples: "지진으로 인한 지표변형", "화산 변위 측정"
 
@@ -55,29 +63,40 @@ STEP 1: Check if CASUAL CONVERSATION
    - Small talk: "잘 지내?", "기분 어때?", "뭐해?", "날씨", "이름"
    → Route to **casual_chat**
    
-STEP 2: Check if VISION TASK
+STEP 2: Check if USER PROVIDED SENTINEL-1 FILES (HIGHEST PRIORITY FOR SAR)
+   - Look for patterns: S1A_IW_SLC__*, S1B_IW_SLC__*, /mnt/sar/S1*, .SAFE, .zip
+   - User explicitly specifies file names/paths
+   - User mentions "master", "slave" with file names
+   → Route to **sar_processing** IMMEDIATELY (DO NOT route to retrieval!)
+   
+STEP 3: Check if VISION TASK
    - Keywords: segmentation, classification, detection, 분할, 분류, 탐지, LULC
    → Route to **vision**
    (NOTE: "SAR 분할" = vision, NOT sar_processing!)
    
-STEP 3: Check if INSAR PROCESSING
+STEP 4: Check if INSAR PROCESSING (without files provided)
    - Keywords: InSAR, interferogram, 간섭무늬, 지표변형, ground deformation
-   → Route to **sar_processing**
+   - User wants InSAR but hasn't provided files yet
+   → Route to **retrieval** (will search and download data first)
    
-STEP 4: Everything else
+STEP 5: Everything else
    - Information queries, web search, SAR data requests
    → Route to **retrieval**
 
 **CRITICAL EXAMPLES:**
 - "안녕하세요" → casual_chat ✓
 - "고마워요" → casual_chat ✓
+- "S1A_IW_SLC__...를 master로 S1B_IW_SLC__...를 slave로 InSAR" → sar_processing ✓
+- "/mnt/sar/S1A_IW_SLC__*.zip으로 InSAR 해줘" → sar_processing ✓
+- "2023년 터키 지진 InSAR 해줘" → retrieval ✓ (files not provided, need search)
 - "2023년 지진 어디?" → retrieval ✓
 - "SAR 분할" → vision ✓
-- "InSAR 처리" → sar_processing ✓
+- "InSAR 처리" → retrieval ✓ (no files provided yet)
 
 **DO NOT:**
 - Route greetings to retrieval (WRONG!)
 - Route "SAR 분할" to sar_processing (WRONG!)
+- Route file-based InSAR requests to retrieval (WRONG! → should go to sar_processing)
 """
 
 main_route_prompt = ChatPromptTemplate.from_messages([

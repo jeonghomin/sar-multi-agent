@@ -4,6 +4,7 @@ ASF (Alaska Satellite Facility)에서 Sentinel-1 SAR 데이터 다운로드 유�
 import os
 import time
 import json
+from pathlib import Path
 
 try:
     import asf_search as asf
@@ -12,6 +13,14 @@ except ImportError:
     ASF_AVAILABLE = False
     print("Warning: asf_search not installed. Install with: pip install asf_search")
 
+# 환경변수에서 SAR 저장 경로 가져오기
+def get_default_sar_path():
+    """환경변수에서 기본 SAR 저장 경로를 가져옴"""
+    paths_str = os.getenv("SAR_DATA_PATHS", "/mnt/sar,/home/mjh/sar_data,/data/sar")
+    paths = [p.strip() for p in paths_str.split(",") if p.strip()]
+    default_path = paths[0] if paths else "/mnt/sar"
+    return f"{default_path}/S1A/Dataset"
+
 
 class SARDownloader:
     """Sentinel-1 SAR 데이터 다운로드 클래스"""
@@ -19,9 +28,9 @@ class SARDownloader:
     def __init__(self, save_path=None):
         """
         Args:
-            save_path: 다운로드 저장 경로 (기본값: /mnt/sar/S1A/Dataset)
+            save_path: 다운로드 저장 경로 (기본값: 환경변수 SAR_DATA_PATHS의 첫 번째 경로)
         """
-        self.save_path = save_path or "/mnt/sar/S1A/Dataset"
+        self.save_path = save_path or get_default_sar_path()
         
         # Earthdata 인증 정보
         self.username = os.environ.get('EARTHDATA_USERNAME', 'jeongho.min')
@@ -142,7 +151,8 @@ class SARDownloader:
     
     def select_insar_pair(self, results):
         """
-        InSAR 처리를 위한 Master/Slave 쌍 선택 (가장 최근 2개)
+        InSAR 처리를 위한 Master/Slave 쌍 선택
+        ⭐ 같은 궤도 번호(relative orbit) & 비행 방향(flight direction)끼리만 선택
         
         Args:
             results: ASF 검색 결과
@@ -153,37 +163,63 @@ class SARDownloader:
         if not results or len(results) == 0:
             return []
         
-        # 날짜별로 그룹화 (같은 날짜의 제품들)
-        date_products = {}
+        # ⭐ 궤도별로 그룹화 (같은 궤도 & 비행 방향)
+        orbit_groups = {}
         for product in results:
-            filename = product.properties['fileName']
-            # 날짜 추출 (예: S1A_IW_SLC__1SDV_20151026T050651_... -> 20151026)
+            props = product.properties
+            filename = props['fileName']
+            
+            # 궤도 정보 추출
+            relative_orbit = props.get('pathNumber') or props.get('relativeOrbit', 'unknown')
+            flight_direction = props.get('flightDirection', 'unknown')
+            
+            # 날짜 추출
             date_str = filename.split('_')[5][:8]
             
-            if date_str not in date_products:
-                date_products[date_str] = []
-            date_products[date_str].append(product)
+            # 궤도+방향을 키로 사용
+            orbit_key = f"{relative_orbit}_{flight_direction}"
+            
+            if orbit_key not in orbit_groups:
+                orbit_groups[orbit_key] = {}
+            
+            if date_str not in orbit_groups[orbit_key]:
+                orbit_groups[orbit_key][date_str] = []
+            
+            orbit_groups[orbit_key][date_str].append(product)
+        
+        print(f"Found {len(orbit_groups)} orbit groups:")
+        for orbit_key, dates in orbit_groups.items():
+            print(f"  - Orbit {orbit_key}: {len(dates)} unique dates")
+        
+        # 가장 많은 날짜를 가진 궤도 선택
+        best_orbit_key = max(orbit_groups.keys(), key=lambda k: len(orbit_groups[k]))
+        best_orbit = orbit_groups[best_orbit_key]
+        
+        print(f"✅ Selected orbit: {best_orbit_key} ({len(best_orbit)} dates)")
         
         # 날짜별로 정렬 (최신순)
-        sorted_dates = sorted(date_products.keys(), reverse=True)
+        sorted_dates = sorted(best_orbit.keys(), reverse=True)
         
         # 각 날짜에서 첫 번째 제품만 선택
         unique_products = []
         for date_str in sorted_dates:
-            unique_products.append(date_products[date_str][0])
-        
-        print(f"Unique dates found: {len(unique_products)}")
+            unique_products.append(best_orbit[date_str][0])
         
         # Master와 Slave 선택 (가장 최근 두 개)
         if len(unique_products) >= 2:
-            master = unique_products[0]  # 가장 최근
-            slave = unique_products[1]    # 두 번째로 최근
+            master = unique_products[0]
+            slave = unique_products[1]
             
             master_date = master.properties['fileName'].split('_')[5][:8]
             slave_date = slave.properties['fileName'].split('_')[5][:8]
             
-            print(f"Master (most recent): {master.properties['fileName']} (Date: {master_date})")
-            print(f"Slave (second recent): {slave.properties['fileName']} (Date: {slave_date})")
+            master_orbit = master.properties.get('pathNumber') or master.properties.get('relativeOrbit', 'unknown')
+            slave_orbit = slave.properties.get('pathNumber') or slave.properties.get('relativeOrbit', 'unknown')
+            
+            print(f"Master (most recent): {master.properties['fileName']}")
+            print(f"  - Date: {master_date}, Orbit: {master_orbit}")
+            print(f"Slave (second recent): {slave.properties['fileName']}")
+            print(f"  - Date: {slave_date}, Orbit: {slave_orbit}")
             
             return [master, slave]
         elif len(unique_products) == 1:

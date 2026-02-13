@@ -68,52 +68,8 @@ def main_router(state):
     
     # 우선순위 0-1: InSAR 파라미터 입력 대기
     if awaiting_insar_params:
-        print("==== [InSAR 파라미터 입력 대기] ====")
-        
-        # 기본값 체크
-        if "기본" in question_lower or "default" in question_lower:
-            params = {
-                "subswath": "IW3",
-                "polarization": "VV",
-                "first_burst": 1,
-                "last_burst": 4
-            }
-            print(f"✅ 기본값 사용: {params}")
-        else:
-            # 파라미터 파싱
-            params = {}
-            
-            # IW 추출
-            iw_match = re.search(r'(IW[123])', question, re.IGNORECASE)
-            params["subswath"] = iw_match.group(1).upper() if iw_match else "IW3"
-            
-            # Polarization 추출
-            pol_match = re.search(r'\b(VV|VH|HH|HV)\b', question, re.IGNORECASE)
-            params["polarization"] = pol_match.group(1).upper() if pol_match else "VV"
-            
-            # Burst 추출
-            burst_match = re.search(r'burst\s*(\d+)\s*-\s*(\d+)', question, re.IGNORECASE)
-            if burst_match:
-                params["first_burst"] = int(burst_match.group(1))
-                params["last_burst"] = int(burst_match.group(2))
-            else:
-                # 단일 숫자 2개 찾기
-                nums = re.findall(r'\b(\d+)\b', question)
-                if len(nums) >= 2:
-                    params["first_burst"] = int(nums[0])
-                    params["last_burst"] = int(nums[1])
-                else:
-                    params["first_burst"] = 1
-                    params["last_burst"] = 4
-            
-            print(f"✅ 파싱된 파라미터: {params}")
-        
-        # state 업데이트하고 run_insar로 라우팅
-        state["insar_parameters"] = params
-        state["awaiting_insar_parameters"] = False
-        state["insar_master_slave_ready"] = True
-        
-        print("==== [InSAR 파라미터 설정 완료 - SAR PROCESSING로] ====")
+        print("==== [InSAR 파라미터 입력 대기 - SAR PROCESSING로] ====")
+        # ⭐ insar_check에서 파라미터 파싱 처리
         return "sar_processing"
     
     # 우선순위 0-2: InSAR 확인 대기 - 긍정적 응답 시 InSAR 처리
@@ -130,42 +86,15 @@ def main_router(state):
             print("==== [InSAR 확인 대기 - 취소 또는 다른 질문 → RETRIEVAL로] ====")
             return "retrieval"
     
-    # 우선순위 1: InSAR 키워드 또는 파일 경로 빠른 체크 (⭐ 최우선!)
-    insar_keywords = ["insar", "간섭무늬", "interferogram", "지표변형", "master", "slave"]
-    has_insar_keyword = any(keyword in question_lower for keyword in insar_keywords)
-    
-    # Sentinel-1 파일 경로 패턴 체크
-    has_sentinel_file = bool(re.search(r'S1[AB]_[^\s]+\.(?:zip|SAFE)', question))
-    
-    # 파일 경로가 명시되어 있으면 바로 SAR PROCESSING으로
-    if has_sentinel_file:
-        print(f"==== [Sentinel 파일 경로 감지 - SAR PROCESSING로 직행] ====")
-        return "sar_processing"
-    
-    # InSAR 키워드만 있고 파일 경로가 없으면 RETRIEVAL로 (웹 검색 & 다운로드)
-    if has_insar_keyword:
-        print(f"==== [InSAR 키워드 감지 - RETRIEVAL로 (검색 & 다운로드)] ====")
-        return "retrieval"
-    
-    # 우선순위 2: 질문 유형 판단 (Q&A 질문인지 확인)
-    # - "어디", "뭐", "어떤", "언제" 같은 의문사 → Q&A 질문
-    qa_keywords = ["어디", "어떤", "뭐", "무엇", "언제", "왜", "어떻게", "얼마",
-                   "where", "what", "when", "why", "how", "which"]
-    is_qa_question = any(keyword in question_lower for keyword in qa_keywords)
-    
-    if is_qa_question:
-        print(f"==== [Q&A 의문사 감지 - LLM 라우터로 새로운 Intent 판단] ====")
-        # LLM 라우터로 넘어가서 정확한 intent 판단
-    
-    # 우선순위 3: Awaiting 플래그 기반 처리
-    # - Q&A 질문이 아니고 + 선택 대기 상태이면 retrieval로 진행
-    elif is_awaiting:
+    # 우선순위 1: Awaiting 플래그 기반 처리
+    # - 선택 대기 상태이면 retrieval로 진행
+    if is_awaiting:
         print(f"==== [Awaiting 플래그 감지 - RETRIEVAL로 계속 진행] ====")
         return "retrieval"
     
-    # 우선순위 4: Previous Intent + 데이터 요청 키워드 기반 라우팅
+    # 우선순위 2: Previous Intent + 데이터 요청 키워드 기반 라우팅
     # - 이전에 SAR 데이터 요청이 있었고 + 데이터 요청 키워드가 있으면 → retrieval로 진행
-    elif previous_intent in ["sar_get_data", "sar_search_location"]:
+    if previous_intent in ["sar_get_data", "sar_search_location"]:
         # 데이터 요청 관련 키워드 체크
         data_request_keywords = ["데이터", "data", "가져와", "받아", "다운로드", "download", 
                                  "주", "시", "도", "현", "구", "군", "읍", "면", "동",  # 지역명
@@ -179,7 +108,7 @@ def main_router(state):
         else:
             print(f"==== [Previous Intent={previous_intent} BUT 데이터 요청 키워드 없음 - 새로운 Intent 판단] ====")
     
-    # 우선순위 5 (최종): 모든 경우 → LLM 라우터 사용 (Intent 판단)
+    # 우선순위 3 (최종): 모든 경우 → LLM 라우터 사용 (Intent 판단)
     try:
         from routing import main_agent as router_agent
         messages = state.get("messages", [])

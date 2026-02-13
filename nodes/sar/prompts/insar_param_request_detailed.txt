@@ -1,0 +1,26 @@
+✅ Master와 Slave를 선택했습니다!
+
+🛰️ **선택된 파일**:
+- Master: {master_filename}
+- Slave: {slave_filename}
+
+⚙️ **InSAR 처리 파라미터를 설정해주세요:**
+
+**1. Subswath (IW)**
+- IW1, IW2, IW3 중 선택
+- 💡 추천: **IW3** (가장 넓은 범위)
+
+**2. Polarization (편파)**
+- VV, VH, HH, HV 중 선택
+- 💡 추천: **VV** (일반적으로 사용)
+
+**3. Burst (버스트 범위)**
+- 첫 번째 burst와 마지막 burst 번호
+- 💡 추천: **1-4** (표준 범위)
+
+**입력 예시:**
+- "IW3, VV, burst 1-4로 해줘"
+- "기본값으로 해줘" (IW3, VV, 1-4)
+- "IW2 사용해줘" (polarization과 burst는 기본값)
+
+💡 **잘 모르시겠다면 "기본값"이라고 입력하세요!**

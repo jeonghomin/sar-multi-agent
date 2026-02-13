@@ -16,23 +16,127 @@ class MasterSlaveCheck(BaseModel):
     reasoning: str = Field(description="판단 근거")
 
 
-def check_insar_master_slave(state):
+# ===== 헬퍼 함수들 =====
+
+def _parse_insar_parameters(question):
     """
-    InSAR 처리 전 Master/Slave 정보 체크 (LLM 기반)
+    질문에서 InSAR 파라미터 파싱
     
-    - Master/Slave가 명시되어 있으면 → run_insar_execute로 라우팅
-    - 명시되어 있지 않으면 → 사용자에게 선택 요청 메시지 출력 → END
+    Returns:
+        dict or None: 파싱된 파라미터 또는 None
     """
-    print("==== [INSAR CHECK - Master/Slave 확인] ====")
+    question_lower = question.lower()
     
-    question = state.get("question", "")
-    downloaded_sar_files = state.get("downloaded_sar_files") or []
-    sar_search_results = state.get("sar_search_results", {})
+    # 기본값 체크
+    if "기본" in question_lower or "default" in question_lower:
+        return {
+            "subswath": "IW3",
+            "polarization": "VV",
+            "first_burst": 1,
+            "last_burst": 4
+        }
     
-    # 사용 가능한 파일 정보 수집
+    # 파라미터 파싱
+    params = {}
+    
+    # IW 추출
+    iw_match = re.search(r'(IW[123])', question, re.IGNORECASE)
+    params["subswath"] = iw_match.group(1).upper() if iw_match else None
+    
+    # Polarization 추출
+    pol_match = re.search(r'\b(VV|VH|HH|HV)\b', question, re.IGNORECASE)
+    params["polarization"] = pol_match.group(1).upper() if pol_match else None
+    
+    # Burst 추출
+    burst_match = re.search(r'burst\s*(\d+)\s*[-~]\s*(\d+)', question, re.IGNORECASE)
+    if burst_match:
+        params["first_burst"] = int(burst_match.group(1))
+        params["last_burst"] = int(burst_match.group(2))
+    else:
+        # 단일 숫자 2개 찾기
+        nums = re.findall(r'\b(\d+)\b', question)
+        if len(nums) >= 2:
+            params["first_burst"] = int(nums[0])
+            params["last_burst"] = int(nums[1])
+        else:
+            params["first_burst"] = None
+            params["last_burst"] = None
+    
+    # 완전히 파싱되었는지 확인
+    if all([params.get("subswath"), 
+           params.get("polarization"),
+           params.get("first_burst") is not None,
+           params.get("last_burst") is not None]):
+        return params
+    
+    return None
+
+
+def _build_ready_response(params=None):
+    """InSAR 실행 준비 완료 응답"""
+    response = {
+        "insar_master_slave_ready": True,
+        "sar_result": {
+            "task": "insar",
+            "status": "ready_for_execution",
+            "message": "Master/Slave 및 파라미터 준비 완료"
+        }
+    }
+    
+    if params:
+        response["insar_parameters"] = params
+        response["awaiting_insar_parameters"] = False
+    
+    return response
+
+
+def _build_param_request_response(master_path, slave_path, detailed=False):
+    """파라미터 입력 요청 응답"""
+    master_filename = master_path.split('/')[-1]
+    slave_filename = slave_path.split('/')[-1]
+    
+    template_file = "sar/prompts/insar_param_request_detailed.txt" if detailed else "sar/prompts/insar_param_request.txt"
+    message = load_prompt(
+        template_file,
+        master_filename=master_filename,
+        slave_filename=slave_filename
+    )
+    
+    return {
+        "generation": message,
+        "downloaded_sar_files": [master_path, slave_path],
+        "insar_master_file": master_path,
+        "insar_slave_file": slave_path,
+        "awaiting_insar_parameters": True,
+        "awaiting_master_slave_selection": False,
+        "insar_master_slave_ready": False,
+        "sar_result": {
+            "task": "insar",
+            "status": "awaiting_parameters",
+            "message": "Master/Slave 선택 완료, 파라미터 입력 대기"
+        },
+        "messages": [AIMessage(content=message)]
+    }
+
+
+def _build_error_response(message):
+    """에러 응답"""
+    return {
+        "generation": message,
+        "sar_result": {
+            "task": "insar",
+            "status": "error",
+            "message": message
+        },
+        "messages": [AIMessage(content=message)]
+    }
+
+
+def _collect_available_files(downloaded_sar_files, sar_search_results):
+    """사용 가능한 SAR 파일 정보 수집"""
     available_files = []
     
-    # 1. downloaded_sar_files (방금 다운로드한 파일)
+    # 1. downloaded_sar_files
     if downloaded_sar_files and len(downloaded_sar_files) >= 2:
         print(f"✅ 다운로드한 파일: {len(downloaded_sar_files)}개")
         for i, f in enumerate(downloaded_sar_files[:2]):
@@ -46,11 +150,11 @@ def check_insar_master_slave(state):
                 'path': f
             })
     
-    # 2. sar_search_results (검색 결과 또는 폴더 스캔 결과)
+    # 2. sar_search_results
     elif sar_search_results and sar_search_results.get('products'):
         products = sar_search_results['products']
         print(f"✅ 검색 결과: {len(products)}개")
-        for p in products[:2]:  # 처음 2개만
+        for p in products[:2]:
             available_files.append({
                 'index': p.get('display_index', p.get('index', 0)),
                 'filename': p.get('filename', ''),
@@ -58,22 +162,76 @@ def check_insar_master_slave(state):
                 'path': p.get('file_path', '')
             })
     
-    if len(available_files) < 2:
-        # 파일이 부족한 경우 에러
-        error_msg = f"""❌ InSAR 처리를 위한 파일이 부족합니다.
+    return available_files
+
+
+def _extract_file_index(identifier_str):
+    """식별자 문자열에서 파일 인덱스 추출 (0 or 1)"""
+    clean = identifier_str.strip()
+    
+    # "0" 또는 "1"이면 직접 변환
+    if clean in ["0", "1"]:
+        return int(clean)
+    
+    # 숫자 추출 시도
+    match = re.search(r'\b([01])\b', clean)
+    if match:
+        return int(match.group(1))
+    
+    return None
+
+
+def check_insar_master_slave(state):
+    """
+    InSAR 처리 전 Master/Slave 정보 체크 (LLM 기반)
+    
+    - Master/Slave가 명시되어 있으면 → run_insar_execute로 라우팅
+    - 명시되어 있지 않으면 → 사용자에게 선택 요청 메시지 출력 → END
+    """
+    print("==== [INSAR CHECK - Master/Slave 확인] ====")
+    
+    question = state.get("question", "")
+    downloaded_sar_files = state.get("downloaded_sar_files") or []
+    sar_search_results = state.get("sar_search_results", {})
+    
+    # ⭐ 이미 state에 Master/Slave가 저장되어 있는지 확인
+    existing_master = state.get("insar_master_file")
+    existing_slave = state.get("insar_slave_file")
+    
+    # ⭐ 1. State에 이미 Master/Slave가 있는 경우
+    if existing_master and existing_slave:
+        print(f"✅ State에 저장된 Master/Slave 발견:")
+        print(f"   Master: {existing_master}")
+        print(f"   Slave: {existing_slave}")
         
+        # 파라미터 확인
+        insar_params = state.get("insar_parameters")
+        if insar_params:
+            print(f"✅ 파라미터도 준비됨: {insar_params}")
+            return _build_ready_response()
+        
+        # 파라미터가 없으면 question에서 파싱 시도
+        print("⚠️ 파라미터 없음 → question에서 파싱 시도")
+        parsed_params = _parse_insar_parameters(question)
+        
+        if parsed_params:
+            print(f"✅ 파라미터 파싱 완료: {parsed_params}")
+            return _build_ready_response(params=parsed_params)
+        
+        # 파싱 실패 → 사용자 입력 요청
+        print("⚠️ 파라미터 파싱 실패 → 사용자 입력 요청")
+        return _build_param_request_response(existing_master, existing_slave)
+    
+    # ⭐ 2. 사용 가능한 파일 정보 수집
+    available_files = _collect_available_files(downloaded_sar_files, sar_search_results)
+    
+    if len(available_files) < 2:
+        error_msg = f"""❌ InSAR 처리를 위한 파일이 부족합니다.
+
 현재 파일 개수: {len(available_files)}개 (필요: 2개)
 
 InSAR 처리를 위해서는 2개의 SAR 이미지가 필요합니다."""
-        return {
-            "generation": error_msg,
-            "sar_result": {
-                "task": "insar",
-                "status": "error",
-                "message": error_msg
-            },
-            "messages": [AIMessage(content=error_msg)]
-        }
+        return _build_error_response(error_msg)
     
     # 파일 정보 문자열 생성
     files_info = "\n".join([
@@ -99,33 +257,13 @@ InSAR 처리를 위해서는 2개의 SAR 이미지가 필요합니다."""
         print(f"  slave_identifier: {result.slave_identifier}")
         print(f"  reasoning: {result.reasoning}")
         
-        # Master/Slave 모두 명시된 경우
+        # ⭐ 3. Master/Slave 모두 명시된 경우
         if result.has_master and result.has_slave:
             print("✅ Master/Slave 모두 명시됨 → InSAR 실행 진행")
             
-            # Master/Slave 인덱스 추출
-            master_idx = None
-            slave_idx = None
-            
-            # 인덱스는 0 또는 1만 유효 (단일 숫자)
-            master_clean = result.master_identifier.strip()
-            slave_clean = result.slave_identifier.strip()
-            
-            # "0" 또는 "1"이면 직접 변환
-            if master_clean in ["0", "1"]:
-                master_idx = int(master_clean)
-            else:
-                # 숫자 추출 시도 (첫 번째 1자리 숫자만)
-                master_match = re.search(r'\b([01])\b', master_clean)
-                if master_match:
-                    master_idx = int(master_match.group(1))
-            
-            if slave_clean in ["0", "1"]:
-                slave_idx = int(slave_clean)
-            else:
-                slave_match = re.search(r'\b([01])\b', slave_clean)
-                if slave_match:
-                    slave_idx = int(slave_match.group(1))
+            # 인덱스 추출
+            master_idx = _extract_file_index(result.master_identifier)
+            slave_idx = _extract_file_index(result.slave_identifier)
             
             # 인덱스 확인
             if master_idx is not None and slave_idx is not None:
@@ -136,15 +274,7 @@ InSAR 처리를 위해서는 2개의 SAR 이미지가 필요합니다."""
 선택한 인덱스가 유효하지 않습니다:
 - Master: {master_idx} (최대: {len(available_files)-1})
 - Slave: {slave_idx} (최대: {len(available_files)-1})"""
-                    return {
-                        "generation": error_msg,
-                        "sar_result": {
-                            "task": "insar",
-                            "status": "error",
-                            "message": error_msg
-                        },
-                        "messages": [AIMessage(content=error_msg)]
-                    }
+                    return _build_error_response(error_msg)
                 
                 # Master/Slave 파일 설정
                 master_file = available_files[master_idx]
@@ -153,58 +283,23 @@ InSAR 처리를 위해서는 2개의 SAR 이미지가 필요합니다."""
                 print(f"✅ Master: [{master_idx}] {master_file['filename']}")
                 print(f"✅ Slave: [{slave_idx}] {slave_file['filename']}")
                 
-                # InSAR 파라미터 확인 (IW, polarization, burst)
+                # ⭐ State에 Master/Slave 파일 저장
+                master_path = master_file['path']
+                slave_path = slave_file['path']
+                
+                # InSAR 파라미터 확인
                 insar_params = state.get("insar_parameters")
                 
                 if not insar_params:
-                    # 파라미터가 없으면 사용자에게 물어보기
                     print("⚠️ InSAR 파라미터 없음 → 사용자 입력 요청")
-                    param_msg = f"""✅ Master와 Slave를 선택했습니다!
-
-🛰️ **선택된 파일**:
-- Master: {master_file['filename']}
-- Slave: {slave_file['filename']}
-
-⚙️ **InSAR 처리 파라미터를 설정해주세요:**
-
-**1. Subswath (IW)**
-- IW1, IW2, IW3 중 선택
-- 💡 추천: **IW3** (가장 넓은 범위)
-
-**2. Polarization (편파)**
-- VV, VH, HH, HV 중 선택
-- 💡 추천: **VV** (일반적으로 사용)
-
-**3. Burst (버스트 범위)**
-- 첫 번째 burst와 마지막 burst 번호
-- 💡 추천: **1-4** (표준 범위)
-
-**입력 예시:**
-- "IW3, VV, burst 1-4로 해줘"
-- "기본값으로 해줘" (IW3, VV, 1-4)
-- "IW2 사용해줘" (polarization과 burst는 기본값)
-
-💡 **잘 모르시겠다면 "기본값"이라고 입력하세요!**
-"""
-                    return {
-                        "generation": param_msg,
-                        "sar_result": {
-                            "task": "insar",
-                            "status": "awaiting_parameters",
-                            "message": "InSAR 파라미터 입력 대기"
-                        },
-                        "messages": [AIMessage(content=param_msg)],
-                        "downloaded_sar_files": [master_file['path'], slave_file['path']],
-                        "awaiting_insar_parameters": True,  # 파라미터 입력 대기
-                        "awaiting_master_slave_selection": False,
-                        "insar_master_slave_ready": False,  # 아직 준비 안 됨
-                    }
+                    return _build_param_request_response(master_path, slave_path, detailed=True)
                 
-                # 파라미터가 있으면 바로 실행 준비
-                # downloaded_sar_files 업데이트 (순서 중요: Master → Slave)
+                # 파라미터 있음 → 실행 준비 완료
                 return {
-                    "downloaded_sar_files": [master_file['path'], slave_file['path']],
-                    "insar_master_slave_ready": True,  # 실행 준비 완료 플래그
+                    "downloaded_sar_files": [master_path, slave_path],
+                    "insar_master_file": master_path,
+                    "insar_slave_file": slave_path,
+                    "insar_master_slave_ready": True,
                     "awaiting_master_slave_selection": False,  # 선택 대기 해제
                 }
             else:

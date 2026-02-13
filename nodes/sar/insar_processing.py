@@ -11,6 +11,17 @@ from .insar_validation import (
     validate_safe_files
 )
 
+# SAR 데이터 경로 설정 가져오기
+try:
+    from config import SAR_DATA_PATHS
+except ImportError:
+    # config.py가 없는 경우 기본 경로 사용
+    SAR_DATA_PATHS = [
+        Path("/mnt/sar"),
+        Path("/home/mjh/sar_data"),
+        Path("/data/sar"),
+    ]
+
 
 def _extract_date(filename):
     m = re.search(r'(\d{8})', filename)
@@ -66,10 +77,14 @@ def run_insar(state):
 
     safe_files = []
     safe_file_patterns = [
+        # 우선순위 1: 전체 경로 (확장자 포함)
         r'(/[^\s]+/S1[AB]_[^\s]+\.zip)',
-        r'(/[^\s]+\.SAFE(?:\.zip)?)',
+        r'(/[^\s]+/S1[AB]_[^\s]+\.SAFE)',
+        # 우선순위 2: 파일명 + 확장자
         r'(S1[AB]_[^\s]+\.SAFE(?:\.zip)?)',
         r'(S1[AB]_[^\s]+\.zip)',
+        # 우선순위 3: 순수 Sentinel-1 파일명 (확장자 없음)
+        r'(S1[AB]_IW_SLC__[^\s]+)',
     ]
 
     explicit_files = []
@@ -82,10 +97,84 @@ def run_insar(state):
 
     if explicit_files and len(explicit_files) >= 2:
         print(f"[INSAR] 질문에서 SAFE 경로 추출: {len(explicit_files)}개")
-        safe_files = [Path(f) for f in explicit_files[:2]]
-        missing = [f for f in safe_files if not f.exists()]
-        if missing:
-            return _error_response(f"❌ 지정한 파일을 찾을 수 없습니다: {', '.join(str(m) for m in missing)}")
+        
+        # 파일 경로 해석: 전체 경로 또는 파일명만 있는 경우 처리
+        resolved_files = []
+        for f in explicit_files[:2]:
+            p = Path(f)
+            
+            # 이미 전체 경로이고 존재하면 그대로 사용
+            if p.is_absolute() and p.exists():
+                resolved_files.append(p)
+                continue
+            
+            # 파일명만 있는 경우: 설정된 SAR 경로에서 검색
+            if not p.is_absolute():
+                # config.py에서 정의된 SAR 데이터 경로 사용
+                search_paths = SAR_DATA_PATHS.copy()
+                
+                # 추가 폴백 경로
+                search_paths.extend([
+                    Path.home() / "sar_data",
+                    Path.cwd() / "sar_data",
+                ])
+                
+                found = False
+                for base_path in search_paths:
+                    if not base_path.exists():
+                        continue
+                    
+                    # 1. 직접 경로에서 .zip 파일 검색
+                    zip_file = base_path / f"{p.stem}.zip"
+                    if zip_file.exists():
+                        resolved_files.append(zip_file)
+                        print(f"  ✓ 파일 발견: {zip_file}")
+                        found = True
+                        break
+                    
+                    # 2. 직접 경로에서 .SAFE 폴더 검색
+                    safe_folder = base_path / f"{p.stem}.SAFE"
+                    if safe_folder.exists():
+                        resolved_files.append(safe_folder)
+                        print(f"  ✓ 폴더 발견: {safe_folder}")
+                        found = True
+                        break
+                    
+                    # 3. 하위 디렉토리까지 재귀적 검색 (rglob)
+                    pattern = f"*{p.stem}*.zip"
+                    matches = list(base_path.rglob(pattern))
+                    if matches:
+                        resolved_files.append(matches[0])
+                        print(f"  ✓ 파일 발견 (재귀 검색): {matches[0]}")
+                        found = True
+                        break
+                    
+                    # 4. .SAFE 폴더도 재귀 검색
+                    safe_pattern = f"*{p.stem}*.SAFE"
+                    safe_matches = list(base_path.rglob(safe_pattern))
+                    if safe_matches:
+                        resolved_files.append(safe_matches[0])
+                        print(f"  ✓ 폴더 발견 (재귀 검색): {safe_matches[0]}")
+                        found = True
+                        break
+                
+                if not found:
+                    return _error_response(
+                        f"❌ 파일을 찾을 수 없습니다: {f}\n"
+                        f"💡 검색한 경로: {', '.join(str(p) for p in search_paths if p.exists())}\n"
+                        f"💡 전체 경로를 제공해주세요 (예: /mnt/sar/{f})"
+                    )
+            else:
+                # 절대 경로인데 존재하지 않음
+                return _error_response(f"❌ 지정한 파일을 찾을 수 없습니다: {f}")
+        
+        if len(resolved_files) < 2:
+            return _error_response(f"❌ 최소 2개의 SAR 파일이 필요합니다 (현재: {len(resolved_files)}개)")
+        
+        safe_files = resolved_files[:2]
+        print(f"[INSAR] 해석된 파일 경로:")
+        for i, f in enumerate(safe_files):
+            print(f"  [{i+1}] {f}")
         
         # insar_master_slave_ready가 True면 바로 실행
         if state.get("insar_master_slave_ready", False):

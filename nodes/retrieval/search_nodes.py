@@ -112,20 +112,24 @@ def web_search(state):
     try:
         optimize_response = llm.invoke(optimize_prompt)
         optimized_query = optimize_response.content.strip() if hasattr(optimize_response, 'content') else question
+        print(f"[WEB SEARCH DEBUG] 최적화된 쿼리: {optimized_query}")
     except Exception as e:
         print(f"쿼리 최적화 실패: {e}")
         optimized_query = question
-
+    
     search_results = web_search_tool.invoke({"query": optimized_query})
+    print(f"[WEB SEARCH DEBUG] 검색 결과 개수: {len(search_results)}")
     search_results_docs = [
         Document(page_content=r['content'], metadata={'source': r['url']}) for r in search_results
     ]
+    print(f"[WEB SEARCH DEBUG] 검색 결과 문서 총 길이: {sum(len(doc.page_content) for doc in search_results_docs)}자")
 
     location_name = None
     date_range = None
     if search_results_docs:
         combined_text = " ".join([doc.page_content for doc in search_results_docs])
         locations = extract_locations_from_text(combined_text)
+        
         extraction_prompt = load_prompt(
             "retrieval/prompts/location_extraction.txt",
             question=question,

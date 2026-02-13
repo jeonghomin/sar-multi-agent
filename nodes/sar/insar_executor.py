@@ -56,8 +56,15 @@ def execute_insar_processing(
             "messages": [AIMessage(content=error_msg)]
         }
     
-    # 작업 디렉토리 생성
-    workdir = safe_files[0].parent / "insar_output"
+    # 작업 디렉토리 생성 (환경변수 경로 사용)
+    try:
+        from config import DEFAULT_SAR_PATH
+        base_path = DEFAULT_SAR_PATH / "insar_output"
+    except ImportError:
+        # fallback: 첫 번째 파일의 부모 디렉토리 사용
+        base_path = safe_files[0].parent / "insar_output"
+    
+    workdir = base_path
     workdir.mkdir(parents=True, exist_ok=True)
     
     print(f"🛰️ InSAR API 호출 준비")

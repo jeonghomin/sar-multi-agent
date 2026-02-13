@@ -1,0 +1,10 @@
+✅ Master/Slave 파일이 준비되었습니다:
+- Master: {master_filename}
+- Slave: {slave_filename}
+
+📝 InSAR 처리 파라미터를 입력해주세요:
+- Subswath (IW1/IW2/IW3)
+- Polarization (VV/VH/HH/HV)
+- Burst 범위 (예: 1-3)
+
+예시: "IW2, VV, 1~3" 또는 "기본값"

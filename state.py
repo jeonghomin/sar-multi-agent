@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 from langgraph.graph.message import add_messages
 
 
-class GraphState(TypedDict):
+class GraphState(TypedDict, total=False):
     """확장된 GraphState (Vision + Retrieval + SAR Processing 통합)"""
     question: Annotated[str, "question"]
     generation: Annotated[str, "generation"]
@@ -48,6 +48,8 @@ class GraphState(TypedDict):
     needs_insar: Annotated[Optional[bool], "needs_insar"]  # InSAR 처리가 필요한지 플래그
     auto_insar_after_download: Annotated[Optional[bool], "auto_insar_after_download"]  # 다운로드 후 자동으로 InSAR 처리 플래그
     insar_master_slave_ready: Annotated[Optional[bool], "insar_master_slave_ready"]  # Master/Slave 선택 완료 플래그
+    insar_master_file: Annotated[Optional[str], "insar_master_file"]  # InSAR Master 파일 경로
+    insar_slave_file: Annotated[Optional[str], "insar_slave_file"]  # InSAR Slave 파일 경로
     insar_parameters: Annotated[Optional[dict], "insar_parameters"]  # InSAR 처리 파라미터 (subswath, polarization, burst)
     awaiting_insar_parameters: Annotated[Optional[bool], "awaiting_insar_parameters"]  # InSAR 파라미터 입력 대기 플래그
     

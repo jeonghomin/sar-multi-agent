@@ -1,5 +1,21 @@
 다음 질문을 웹 검색에 최적화된 구체적인 검색 쿼리로 변환하세요.
+
 이전 대화 요약: {summary}
 최근 대화: {recent_context}
 현재 질문: {question}
-중요: 연도/날짜 포함, 지역명 구체화, 영문 키워드 포함. 출력: 최적화된 쿼리만 (한 줄).
+
+**최적화 규칙:**
+1. **연도/날짜를 반드시 포함**하세요 (예: 2023, 2024-02-06)
+2. **지역명을 구체화**하세요 (도시명, 국가명 포함, 단 사용자가 명시한 경우만)
+3. **신뢰할 만한 소스 키워드 포함** (예: "USGS", "Wikipedia", "기상청")
+4. **영문 키워드도 포함** (예: "earthquake", "seismic", "disaster")
+5. **상세 정보 검색을 위한 키워드 추가** (예: "magnitude", "date", "casualties", "details")
+
+**출력 예시:**
+- 원본: "2023년 지진 발생 지역 알려줘"
+- 최적화: "2023 earthquake locations magnitude date casualties USGS Wikipedia"
+
+- 원본: "튀르키예 지진 언제야?"
+- 최적화: "Turkey Kahramanmaraş earthquake 2023 date time magnitude USGS Wikipedia"
+
+**중요:** 최적화된 쿼리만 한 줄로 출력하세요. 설명이나 추가 텍스트 없이.

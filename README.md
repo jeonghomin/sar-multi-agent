@@ -65,6 +65,12 @@ conda activate rag
 # Install Python packages
 pip install -r requirements.txt
 
+# Configure environment variables (.env file)
+# Copy .env.example if available, or create .env with:
+# - TAVILY_API_KEY: Web search API key
+# - SAR_DATA_PATHS: SAR data storage paths (comma-separated)
+#   Example: /mnt/sar,/home/user/sar_data,/data/sar
+
 # Install SNAP Python API (for InSAR)
 cd services/insar_processing
 bash INSTALL_ESA_SNAPPY.sh

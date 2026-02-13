@@ -47,6 +47,7 @@ class DownloadRequest(BaseModel):
     max_results: int = Field(10, description="최대 검색 결과 수", example=10)
     master_index: Optional[int] = Field(None, description="Master로 선택할 데이터 인덱스 (검색 결과에서)")
     slave_index: Optional[int] = Field(None, description="Slave로 선택할 데이터 인덱스 (검색 결과에서)")
+    selected_indices: Optional[list] = Field(None, description="단일/다중 선택할 데이터 인덱스 리스트 (검색 결과에서)")
 
 
 class DownloadResponse(BaseModel):
@@ -137,7 +138,9 @@ async def search_sar(request: SearchRequest):
                 "date": date_str,
                 "size_mb": round(float(product.properties.get('bytes', 0)) / (1024 * 1024), 2),
                 "platform": product.properties.get('platform', 'N/A'),
-                "polarization": product.properties.get('polarization', 'N/A')
+                "polarization": product.properties.get('polarization', 'N/A'),
+                "relative_orbit": product.properties.get('pathNumber') or product.properties.get('relativeOrbit', 'N/A'),
+                "flight_direction": product.properties.get('flightDirection', 'N/A')
             })
         
         # 날짜순 정렬
@@ -244,6 +247,21 @@ async def download_sar(request: DownloadRequest, background_tasks: BackgroundTas
                     return DownloadResponse(
                         success=False,
                         message=f"인덱스 범위 초과: 최대 {len(results)-1}",
+                        error="index_out_of_range"
+                    )
+        elif request.selected_indices is not None and len(request.selected_indices) > 0:
+            # 다중 선택 (selected_indices 사용)
+            print(f"✅ 사용자 선택 (다중): {request.selected_indices}")
+            for idx in request.selected_indices:
+                if idx < len(results):
+                    selected = results[idx]
+                    selected_products.append(selected)
+                    selected_name = selected.properties['fileName']
+                    print(f"  [{idx}] Selected: {selected_name}")
+                else:
+                    return DownloadResponse(
+                        success=False,
+                        message=f"인덱스 범위 초과: 인덱스 {idx}, 최대 {len(results)-1}",
                         error="index_out_of_range"
                     )
         else:

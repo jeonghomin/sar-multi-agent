@@ -5,178 +5,29 @@ from core.llm_config import llm
 from location_utils import location_to_coordinates
 from langchain_core.messages import AIMessage
 
+from .download_helpers import (
+    extract_event_date,
+    extract_location_from_question,
+    auto_select_for_insar,
+    parse_master_slave_selection,
+    is_new_search_request,
+    validate_indices,
+    parse_single_selection
+)
+from .download_formatter import (
+    filter_and_group_by_event,
+    format_search_results_header,
+    format_products_by_orbit,
+    build_insar_selection_message,
+    build_single_selection_message
+)
+from .download_executor import (
+    execute_download_insar,
+    execute_download_single
+)
+
 SAR_DOWNLOAD_API_URL = "http://localhost:8001"
 SAR_DOWNLOAD_AVAILABLE = True
-
-
-def _extract_event_date(question, llm):
-    """질문에서 이벤트 발생 날짜 추출 (헬퍼 함수)"""
-    prompt = f"""질문에서 지진/화산 등 이벤트 발생 날짜를 추출하세요:
-질문: {question}
-
-출력 형식: YYYY-MM-DD (날짜가 없으면 '없음')
-
-예시:
-질문: "터키 2023년 2월 6일 지진"
-출력: 2023-02-06
-
-질문: "2011년 일본 도호쿠 지진"
-출력: 2011-03-11
-"""
-    try:
-        response = llm.invoke(prompt)
-        text = response.content.strip() if hasattr(response, 'content') else str(response).strip()
-        for line in text.split('\n'):
-            line = line.strip()
-            if line and line.lower() not in ['없음', 'none', 'no', '']:
-                if len(line) == 10 and line[4] == '-' and line[7] == '-':
-                    return line
-        
-        return None
-    except:
-        return None
-
-
-def _extract_location_from_question(question, llm):
-    """질문에서 지역명 추출 (헬퍼 함수)"""
-    prompt = f"질문에서 지역명 추출: {question}\n지역명만 출력 (없으면 '없음'):"
-    try:
-        response = llm.invoke(prompt)
-        location = response.content.strip() if hasattr(response, 'content') else str(response).strip()
-        if location and location.lower() not in ["없음", "none", "no", ""]:
-            return location
-    except:
-        pass
-    return None
-
-
-def _auto_select_for_insar(products, event_date):
-    """InSAR용 자동 2개 선택 (이벤트 날짜 기준 전후)"""
-    from datetime import datetime
-    
-    if not products or len(products) < 2:
-        return None, None
-    
-    try:
-        if '-' in event_date:
-            event_dt = datetime.strptime(event_date, '%Y-%m-%d')
-        else:
-            event_dt = datetime.strptime(event_date, '%Y%m%d')
-    except:
-        return products[0].get('display_index', 0), products[1].get('display_index', 1)
-    
-    products_with_distance = []
-    for p in products:
-        try:
-            p_date = p.get('date', '')
-            if not p_date:
-                continue
-            if '-' in p_date:
-                p_dt = datetime.strptime(p_date, '%Y-%m-%d')
-            else:
-                p_dt = datetime.strptime(p_date, '%Y%m%d')
-            
-            days_diff = (p_dt - event_dt).days
-            products_with_distance.append({
-                'product': p,
-                'days_diff': days_diff,
-                'abs_days_diff': abs(days_diff)
-            })
-        except:
-            continue
-    
-    if len(products_with_distance) < 2:
-        return products[0].get('display_index', 0), products[1].get('display_index', 1)
-    
-    products_with_distance.sort(key=lambda x: x['abs_days_diff'])
-    before_products = [p for p in products_with_distance if p['days_diff'] < 0]
-    after_products = [p for p in products_with_distance if p['days_diff'] >= 0]
-    
-    master_idx = None
-    slave_idx = None
-    
-    if before_products and after_products:
-        master_idx = before_products[0]['product'].get('display_index')
-        slave_idx = after_products[0]['product'].get('display_index')
-    else:
-        master_idx = products_with_distance[0]['product'].get('display_index')
-        slave_idx = products_with_distance[1]['product'].get('display_index')
-    
-    return master_idx, slave_idx
-
-
-def _parse_master_slave_selection(question):
-    """사용자 응답에서 Master/Slave 인덱스 추출 (InSAR용)"""
-    import re
-    
-    master_match = re.search(r'[Mm]aster[\s:]*(\d+)', question)
-    slave_match = re.search(r'[Ss]lave[\s:]*(\d+)', question)
-    
-    if master_match and slave_match:
-        return int(master_match.group(1)), int(slave_match.group(1))
-    
-    numbers = re.findall(r'(\d+)번?', question)
-    if len(numbers) >= 2:
-        return int(numbers[0]), int(numbers[1])
-    
-    return None, None
-
-
-def _is_new_search_request(question):
-    """질문이 새로운 검색 요청인지 판단 (날짜/지역 정보 포함 여부)"""
-    import re
-    
-    date_patterns = [r'\d{4}년', r'\d{1,2}월', r'\d{1,2}일', r'\d{4}[-/]\d{1,2}[-/]\d{1,2}']
-    has_date = any(re.search(pattern, question) for pattern in date_patterns)
-    location_keywords = ["지역", "지진", "위치", "어디", "where", "location", "데이터 가져", "데이터 받", "다운로드"]
-    has_location = any(keyword in question.lower() for keyword in location_keywords)
-    return has_date or has_location
-
-
-def _get_date_range(state):
-    """state에서 검색/다운로드용 날짜 범위 반환 (start_date, end_date)"""
-    from datetime import datetime, timedelta
-    date_range = state.get("date_range", {})
-    event_date = date_range.get("event_date")
-    if event_date:
-        try:
-            event_dt = datetime.strptime(event_date, "%Y-%m-%d")
-            return (event_dt - timedelta(days=730)).strftime("%Y-%m-%d"), (event_dt + timedelta(days=730)).strftime("%Y-%m-%d")
-        except Exception:
-            pass
-    return date_range.get("start_date", "2022-01-01"), date_range.get("end_date", "2024-12-31")
-
-
-def _validate_indices(products, indices, max_idx_key='display_index'):
-    """인덱스 범위 검증."""
-    valid_indices = [p.get(max_idx_key) for p in products if max_idx_key in p]
-    max_idx = max(valid_indices) if valid_indices else len(products) - 1
-    idx_list = indices if isinstance(indices, list) else [indices]
-    invalid = [i for i in idx_list if i > max_idx]
-    return (len(invalid) == 0, max_idx, invalid)
-
-
-def _parse_single_selection(question):
-    """사용자 응답에서 인덱스 추출 (일반 SAR용) - 단일 또는 다중 선택 지원"""
-    import re
-    
-    cleaned = question
-    cleaned = re.sub(r'\d{4}[-/년]\d{1,2}[-/월]\d{1,2}일?', '', cleaned)
-    cleaned = re.sub(r'\d{4}년', '', cleaned)
-    cleaned = re.sub(r'\d{1,2}월', '', cleaned)
-    cleaned = re.sub(r'\d{1,2}일', '', cleaned)
-    number_with_marker = re.findall(r'(\d+)번', cleaned)
-    if number_with_marker:
-        indices = sorted(list(set([int(n) for n in number_with_marker])))
-        return indices
-    
-    numbers = re.findall(r'(\d+)', cleaned)
-    if numbers:
-        indices = sorted(list(set([int(n) for n in numbers if not (1900 <= int(n) <= 2100)])))
-        indices = [idx for idx in indices if idx <= 100]
-        return indices if indices else None
-    
-    return None
 
 
 def download_sar(state):
@@ -198,10 +49,10 @@ def download_sar(state):
         sar_search_results = state.get("sar_search_results")
         
         if awaiting_selection and sar_search_results:
-            if _is_new_search_request(question):
+            if is_new_search_request(question):
                 awaiting_selection = False
             else:
-                master_idx, slave_idx = _parse_master_slave_selection(question)
+                master_idx, slave_idx = parse_master_slave_selection(question)
                 
                 if master_idx is None or slave_idx is None:
                     msg = "❌ Master/Slave 인덱스를 파싱할 수 없습니다. 형식: 'Master 1, Slave 5' 또는 '1번과 5번'"
@@ -212,7 +63,7 @@ def download_sar(state):
                     }
                 products = sar_search_results.get('products', [])
                 if products and 'file_path' in products[0]:
-                    ok, max_idx, _ = _validate_indices(products, [master_idx, slave_idx])
+                    ok, max_idx, _ = validate_indices(products, [master_idx, slave_idx])
                     if not ok:
                         msg = f"❌ 인덱스 범위 초과 (Master: {master_idx}, Slave: {slave_idx}, 최대: {max_idx})"
                         return {
@@ -220,8 +71,20 @@ def download_sar(state):
                             "messages": [AIMessage(content=msg)],
                             "awaiting_master_slave_selection": True,
                         }
-                    master_file = products[master_idx]['file_path']
-                    slave_file = products[slave_idx]['file_path']
+                    # ⭐ display_index로 제품 찾기
+                    master_product = next((p for p in products if p.get('display_index') == master_idx), None)
+                    slave_product = next((p for p in products if p.get('display_index') == slave_idx), None)
+                    
+                    if not master_product or not slave_product:
+                        msg = f"❌ 선택한 인덱스를 찾을 수 없습니다: Master[{master_idx}], Slave[{slave_idx}]"
+                        return {
+                            "generation": msg,
+                            "messages": [AIMessage(content=msg)],
+                            "awaiting_master_slave_selection": True,
+                        }
+                    
+                    master_file = master_product['file_path']
+                    slave_file = slave_product['file_path']
                     return {
                         "generation": f"✅ Master와 Slave를 선택했습니다. InSAR 처리를 시작합니다...",
                         "messages": [AIMessage(content="✅ Master와 Slave를 선택했습니다. InSAR 처리를 시작합니다...")],
@@ -231,7 +94,7 @@ def download_sar(state):
                     }
                 else:
                     # ASF 다운로드 필요
-                    return _execute_download_insar(
+                    return execute_download_insar(
                         state,
                         sar_search_results,
                         master_idx,
@@ -243,10 +106,12 @@ def download_sar(state):
         sar_search_results = state.get("sar_search_results")
         
         if awaiting_selection and sar_search_results:
-            if _is_new_search_request(question):
+            if is_new_search_request(question):
                 awaiting_selection = False
             else:
-                selected_indices = _parse_single_selection(question)
+                print(f"[DOWNLOAD DEBUG] parse_single_selection 호출 중... 질문: {question}")
+                selected_indices = parse_single_selection(question, llm)
+                print(f"[DOWNLOAD DEBUG] parse_single_selection 완료! 결과: {selected_indices}")
                 
                 if selected_indices is None or len(selected_indices) == 0:
                     msg = "❌ 인덱스를 파싱할 수 없습니다. 형식: '1번' 또는 '1,2,3'"
@@ -255,7 +120,7 @@ def download_sar(state):
                         "messages": [AIMessage(content=msg)],
                         "awaiting_single_sar_selection": True,
                     }
-                return _execute_download_single(
+                return execute_download_single(
                     state,
                     sar_search_results,
                     selected_indices
@@ -277,7 +142,7 @@ def download_sar(state):
             except Exception:
                 coordinates = coords
     if not coordinates:
-        location = _extract_location_from_question(question, llm)
+        location = extract_location_from_question(question, llm)
         if location:
             coords = location_to_coordinates(location)
             if coords:
@@ -307,11 +172,11 @@ def download_sar(state):
     if date_range:
         event_date = date_range.get("event_date")
     if not event_date:
-        event_date = _extract_event_date(question, llm)
+        event_date = extract_event_date(question, llm)
     if not event_date:
         summary = state.get("summary", "")
         if summary:
-            event_date = _extract_event_date(summary, llm)
+            event_date = extract_event_date(summary, llm)
     
     if event_date:
         from datetime import datetime, timedelta
@@ -361,108 +226,19 @@ def download_sar(state):
         
         products = search_result['products']
         total = search_result['total']
-        if event_date:
-            from datetime import datetime
-            try:
-                event_dt = datetime.strptime(event_date, "%Y-%m-%d")
-                
-                before_products = []
-                after_products = []
-                
-                for product in products:
-                    product_date_str = product['date']  # YYYYMMDD 형식
-                    product_dt = datetime.strptime(product_date_str, "%Y%m%d")
-                    time_diff_days = (product_dt - event_dt).days  # 부호 있는 차이
-                    
-                    product['time_diff_days'] = time_diff_days
-                    product['product_dt'] = product_dt
-                    
-                    if time_diff_days < 0:  # 발생 이전
-                        before_products.append(product)
-                    else:  # 발생 이후 (동일 날짜 포함)
-                        after_products.append(product)
-                
-                before_products.sort(key=lambda x: x['product_dt'], reverse=True)
-                after_products.sort(key=lambda x: x['product_dt'])
-                before_top = before_products[:5]
-                after_top = after_products[:5]
-                
-                filtered_products = before_top + after_top
-                for i, product in enumerate(filtered_products):
-                    product['original_index'] = product['index']
-                    product['display_index'] = i
-                
-                products = filtered_products
-                display_limit = len(products)
-            except Exception:
-                display_limit = min(10, total)
-                products = products[:display_limit]
-                for i, product in enumerate(products):
-                    product['original_index'] = product['index']
-                    product['display_index'] = i
-        else:
-            display_limit = min(10, total)
-            products = products[:display_limit]
-            for i, product in enumerate(products):
-                product['original_index'] = product['index']
-                product['display_index'] = i
-        
         actual_date_range = search_result.get('date_range', 'N/A')
-        event_info = ""
-        if event_date:
-            from datetime import datetime
-            try:
-                event_dt = datetime.strptime(event_date, "%Y-%m-%d")
-                before_count = sum(1 for p in products if 'time_diff_days' in p and p['time_diff_days'] < 0)
-                after_count = sum(1 for p in products if 'time_diff_days' in p and p['time_diff_days'] >= 0)
-                
-                if before_count == 0:
-                    event_info = f"\n⚠️ **이벤트 날짜({event_date}) 이전 데이터가 없습니다!** (발생 전 0개, 발생 후 {after_count}개)"
-                elif after_count == 0:
-                    event_info = f"\n⚠️ **이벤트 날짜({event_date}) 이후 데이터가 없습니다!** (발생 전 {before_count}개, 발생 후 0개)"
-                else:
-                    event_info = f"\n🎯 이벤트 날짜({event_date}) 기준 전/후 각 5개씩 (총 {display_limit}개) 표시 (발생 직전/직후 우선)"
-            except:
-                pass
         
-        generation = f"""✅ **{location}**에서 **{total}개의 SAR 데이터**를 찾았습니다!
-
-📅 **요청한 검색 범위**: {start_date} ~ {end_date}
-📊 **실제 데이터 날짜 범위**: {actual_date_range}
-📍 좌표: ({lat}, {lon}){event_info}
-
-📊 **데이터 리스트** (상위 {display_limit}개):
-
-"""
+        # 이벤트 날짜 기준으로 제품 필터링 및 그룹화
+        products, event_info = filter_and_group_by_event(products, event_date, display_limit=10)
+        display_limit = len(products)
         
-        date_groups = {}
-        for product in products:
-            date = product['date']
-            if date not in date_groups:
-                date_groups[date] = []
-            date_groups[date].append(product)
+        # 헤더 생성
+        generation = format_search_results_header(
+            location, total, start_date, end_date, actual_date_range, lat, lon, event_info
+        )
         
-        sorted_dates = sorted(date_groups.keys())
-        
-        for date in sorted_dates:
-            formatted_date = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
-            timing_label = ""
-            if event_date and date_groups[date]:
-                first_product = date_groups[date][0]
-                if 'time_diff_days' in first_product:
-                    diff = first_product['time_diff_days']
-                    if diff < 0:
-                        timing_label = f" (📌 발생 {abs(diff)}일 전)"
-                    elif diff > 0:
-                        timing_label = f" (📌 발생 {diff}일 후)"
-                    else:
-                        timing_label = f" (📌 발생 당일)"
-            
-            for product in date_groups[date]:
-                idx = product.get('display_index', product['index'])
-                filename = product['filename']
-                size_mb = product['size_mb']
-                generation += f"\n[{idx}] {formatted_date}{timing_label}\n    📁 {filename[:60]}...\n    💾 크기: {size_mb} MB\n"
+        # 제품 리스트 포맷팅 (Orbit별 그룹화)
+        generation += format_products_by_orbit(products, needs_insar=needs_insar)
         
         if total > display_limit:
             generation += f"\n... 외 {total - display_limit}개\n"
@@ -477,7 +253,7 @@ def download_sar(state):
         
         if needs_insar:
             if auto_insar and event_date:
-                master_idx, slave_idx = _auto_select_for_insar(products, event_date)
+                master_idx, slave_idx = auto_select_for_insar(products, event_date)
                 
                 if master_idx is None or slave_idx is None:
                     msg = f"❌ InSAR용 데이터를 자동 선택할 수 없습니다. 이벤트 날짜({event_date}) 기준 전/후 데이터 없음.\n\n{generation}\n\n수동 선택: 'Master 1, Slave 5'"
@@ -490,7 +266,7 @@ def download_sar(state):
                         "auto_insar_after_download": False,
                     }
                 
-                download_result = _execute_download_insar(
+                download_result = execute_download_insar(
                     state,
                     filtered_search_result,
                     master_idx,
@@ -518,19 +294,7 @@ def download_sar(state):
                     "auto_insar_after_download": False,
                 }
             
-            generation += f"""
-
-🎯 **Master와 Slave를 선택해주세요 (InSAR용):**
-
-다음 형식으로 입력:
-- "Master 1, Slave 5"
-- "1번과 5번"
-
-💡 **선택 팁 (InSAR 지표변형 분석):**
-- **Master**: 이벤트 **이전** 날짜 (기준 이미지, 변화 전)
-- **Slave**: 이벤트 **이후** 날짜 (비교 이미지, 변화 후)
-- 발생 시점에 **가장 가까운 전/후 데이터**를 선택하세요!
-"""
+            generation += build_insar_selection_message()
             return {
                 "generation": generation,
                 "messages": [AIMessage(content=generation)],
@@ -541,16 +305,7 @@ def download_sar(state):
                 "needs_insar": True,
             }
         else:
-            generation += f"""
-
-🎯 **데이터를 선택해주세요:**
-
-다음 형식으로 입력:
-- 단일 선택: "1번" 또는 "5"
-- 다중 선택: "1,2,3" 또는 "1 2 3"
-
-💡 여러 개를 선택하면 모두 다운로드됩니다!
-"""
+            generation += build_single_selection_message()
             return {
                 "generation": generation,
                 "messages": [AIMessage(content=generation)],
